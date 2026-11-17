@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vélib' en temps réel — Pipeline de données</title>
+<meta name="description" content="Tableau de bord alimenté par un pipeline ETL automatisé (Python, SQL, GitHub Actions) sur les données ouvertes Vélib' Métropole. Projet de Fatou Sarr.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --bg: #f6f0e8; --surface: #fffaf4; --surface-2: #efe5d9; --text: #2a1c14; --muted: #6e5b4e;
+    --line: rgba(42,28,20,.12); --accent: #b4532a; --mech: #3f7d5c; --ebike: #2f6fb0;
+    --empty: #c0392b; --full: #8e5bb5;
+    --serif: 'Fraunces', Georgia, serif; --sans: 'Inter', system-ui, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16100c; --surface: #201813; --surface-2: #2a201a; --text: #f3e8dc; --muted: #b9a696;
+      --line: rgba(243,232,220,.12); --accent: #e48b5c; --mech: #6cc28f; --ebike: #6aa8e8;
+      --empty: #ef6f5e; --full: #b98be0; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16100c; --surface: #201813; --surface-2: #2a201a; --text: #f3e8dc; --muted: #b9a696;
+    --line: rgba(243,232,220,.12); --accent: #e48b5c; --mech: #6cc28f; --ebike: #6aa8e8;
+    --empty: #ef6f5e; --full: #b98be0; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 16px; line-height: 1.6; }
+  .wrap { width: min(1160px, 100% - 32px); margin-inline: auto; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  h1, h2 { font-family: var(--serif); font-weight: 500; margin: 0; line-height: 1.15; }
+  header { padding: 40px 0 24px; }
+  .kicker { font-size: .78rem; text-transform: uppercase; letter-spacing: .12em; color: var(--accent); font-weight: 600; }
+  h1 { font-size: clamp(2rem, 4.5vw, 3rem); margin: 8px 0 12px; }
+  .intro { color: var(--muted); max-width: 46em; }
+  .meta { display: flex; flex-wrap: wrap; gap: 10px 18px; margin-top: 18px; font-size: .9rem; align-items: center; }
+  .live { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mech); animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .chipl { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); text-decoration: none; color: var(--text); background: var(--surface); }
+  .chipl:hover { border-color: var(--accent); }
+
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin: 8px 0 24px; }
+  .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .kpi small { display: block; color: var(--muted); font-size: .8rem; }
+  .kpi b { display: block; font-family: var(--serif); font-weight: 500; font-size: 2rem; line-height: 1.2; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .kpi span { font-size: .82rem; color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 22px; min-width: 0; }
+  .card h2 { font-size: 1.25rem; margin-bottom: 4px; }
+  .card p.sub { color: var(--muted); font-size: .88rem; margin: 0 0 14px; }
+  #map { height: 460px; border-radius: 12px; z-index: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .8rem; color: var(--muted); margin-top: 10px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .chart-box { position: relative; height: 260px; }
+  .stack { display: grid; gap: 16px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty-note { color: var(--muted); font-size: .9rem; padding: 24px 0; text-align: center; }
+
+  .how { margin-top: 16px; }
+  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; counter-reset: step; }
+  .step { background: var(--surface-2); border-radius: 14px; padding: 16px; position: relative; }
+  .step b { display: block; margin-bottom: 4px; }
+  .step b::before { counter-increment: step; content: counter(step) ". "; color: var(--accent); }
+  .step p { margin: 0; font-size: .88rem; color: var(--muted); }
+  .quality { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .quality span { font-size: .82rem; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); }
+  footer { padding: 32px 0 48px; color: var(--muted); font-size: .88rem; }
+
+  .leaflet-popup-content { font-family: var(--sans); font-size: .85rem; }
+
+  @media (max-width: 980px) { .kpis { grid-template-columns: repeat(3, 1fr); } .grid, .row2 { grid-template-columns: 1fr; } .flow { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 560px) { .kpis { grid-template-columns: 1fr 1fr; } .kpi b { font-size: 1.6rem; } #map { height: 360px; } .flow { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+</style>
+</head>
+<body>
+<header class="wrap">
+  <div class="kicker">Projet Data Engineering · Fatou Sarr</div>
+  <h1>Vélib' Métropole en temps réel</h1>
+  <p class="intro">Un pipeline ETL automatisé collecte toutes les heures l'état des 1 500 stations Vélib', contrôle la qualité des données, les charge dans une base SQL et calcule les indicateurs ci-dessous.</p>
+  <div class="meta">
+    <span class="live"><span class="dot" aria-hidden="true"></span><span id="updated">Chargement…</span></span>
+    <a class="chipl" href="https://github.com/SARR-Fatou/velib-pipeline">Code source sur GitHub ↗</a>
+    <a class="chipl" href="https://sarr-fatou.github.io/">Portfolio ↗</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="kpis" aria-label="Indicateurs clés">
+    <div class="kpi"><small>Vélos disponibles</small><b id="k-bikes">–</b><span id="k-fill"></span></div>
+    <div class="kpi"><small>Vélos mécaniques</small><b id="k-mech" style="color:var(--mech)">–</b><span>&nbsp;</span></div>
+    <div class="kpi"><small>Vélos électriques</small><b id="k-ebike" style="color:var(--ebike)">–</b><span id="k-share"></span></div>
+    <div class="kpi"><small>Stations vides</small><b id="k-empty" style="color:var(--empty)">–</b><span>aucun vélo</span></div>
+    <div class="kpi"><small>Stations pleines</small><b id="k-full" style="color:var(--full)">–</b><span>aucune borne libre</span></div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Carte des stations</h2>
+      <p class="sub">Couleur selon le taux de remplissage. Cliquez sur une station pour le détail.</p>
+      <div id="map" role="img" aria-label="Carte des stations Vélib'"></div>
+      <div class="legend">
+        <span><i style="background:#c0392b"></i>Vide</span>
+        <span><i style="background:#e67e22"></i>&lt; 25 %</span>
+        <span><i style="background:#d4ac0d"></i>25–50 %</span>
+        <span><i style="background:#58a55c"></i>50–99 %</span>
+        <span><i style="background:#8e5bb5"></i>Pleine</span>
+      </div>
+    </section>
+    <div class="stack">
+      <section class="card">
+        <h2>Répartition des stations</h2>
+        <p class="sub">Nombre de stations par taux de remplissage.</p>
+        <div class="chart-box"><canvas id="c-dist" aria-label="Répartition des stations par taux de remplissage"></canvas></div>
+      </section>
+      <section class="card">
+        <h2>Profil horaire moyen</h2>
+        <p class="sub">Vélos disponibles en moyenne selon l'heure (Paris), sur tout l'historique.</p>
+        <div class="chart-box"><canvas id="c-hour" aria-label="Vélos disponibles par heure"></canvas></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <h2>Évolution sur 14 jours</h2>
+    <p class="sub">Une mesure par heure, collectée automatiquement par GitHub Actions.</p>
+    <div class="chart-box" style="height:300px"><canvas id="c-hist" aria-label="Évolution du nombre de vélos disponibles"></canvas></div>
+  </section>
+
+  <div class="row2">
+    <section class="card">
+      <h2>Grandes stations vides</h2>
+      <p class="sub">Les plus grandes stations sans aucun vélo en ce moment.</p>
+      <table><thead><tr><th>Station</th><th class="n">Capacité</th></tr></thead><tbody id="t-empty"></tbody></table>
+    </section>
+    <section class="card">
+      <h2>Électriques disponibles</h2>
+      <p class="sub">Stations avec le plus de vélos électriques.</p>
+      <table><thead><tr><th>Station</th><th class="n">Électriques</th><th class="n">Total</th></tr></thead><tbody id="t-ebike"></tbody></table>
+    </section>
+  </div>
+
+  <section class="card how">
+    <h2>Comment ça marche</h2>
+    <div class="flow">
+      <div class="step"><b>Extract</b><p>Python télécharge les flux ouverts GBFS de Vélib' Métropole (référentiel + état des stations).</p></div>
+      <div class="step"><b>Transform</b><p>Jointure des deux flux, séparation mécaniques / électriques, contrôles qualité et rejet des lignes incohérentes.</p></div>
+      <div class="step"><b>Load</b><p>Chargement dans SQLite, historisation et calcul des indicateurs en SQL (agrégations, CASE, jointures).</p></div>
+      <div class="step"><b>Automatisation</b><p>GitHub Actions lance le pipeline et les tests chaque heure, puis publie ce tableau de bord.</p></div>
+    </div>
+    <div class="quality" id="quality" aria-label="Rapport qualité de la dernière collecte"></div>
+  </section>
+</main>
+
+<footer class="wrap">
+  Données : <a href="https://www.velib-metropole.fr/donnees-open-data-gbfs-du-service-velib-metropole">Vélib' Métropole — open data GBFS</a> · Fonds de carte © OpenStreetMap · Réalisé par <a href="https://sarr-fatou.github.io/">Fatou Sarr</a>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(function () {
+  var css = getComputedStyle(document.documentElement);
+  var C = function (n) { return css.getPropertyValue(n).trim(); };
+  var fmt = new Intl.NumberFormat('fr-FR');
+  var $ = function (id) { return document.getElementById(id); };
+
+  Chart.defaults.font.family = "Inter, system-ui, sans-serif";
+  Chart.defaults.color = C('--muted');
+  Chart.defaults.borderColor = C('--line');
+
+  function colorFor(mech, ebike, docks, cap) {
+    var bikes = mech + ebike;
+    if (bikes === 0) return '#c0392b';
+    if (docks === 0) return '#8e5bb5';
+    var r = cap ? bikes / cap : 0;
+    if (r < .25) return '#e67e22';
+    if (r < .5) return '#d4ac0d';
+    return '#58a55c';
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+  Promise.all([
+    fetch('data/latest.json', { cache: 'no-store' }).then(function (r) { return r.json(); }),
+    fetch('data/history.json', { cache: 'no-store' }).then(function (r) { return r.json(); })
+  ]).then(function (res) {
+    var latest = res[0], history = res[1], n = latest.network;
+
+    var d = new Date(latest.updated_at);
+    $('updated').textContent = 'Mis à jour le ' + d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) +
+      ' à ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+    $('k-bikes').textContent = fmt.format(n.bikes);
+    $('k-fill').textContent = n.fill_rate_pct + ' % de remplissage';
+    $('k-mech').textContent = fmt.format(n.mechanical);
+    $('k-ebike').textContent = fmt.format(n.ebike);
+    $('k-share').textContent = n.ebike_share_pct + ' % de la flotte dispo';
+    $('k-empty').textContent = fmt.format(n.empty_stations);
+    $('k-full').textContent = fmt.format(n.full_stations);
+
+    // Carte
+    var map = L.map('map', { preferCanvas: true, scrollWheelZoom: false }).setView([48.8566, 2.3522], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
+    latest.stations.forEach(function (s) {
+      var name = s[0], lat = s[1], lon = s[2], cap = s[3], mech = s[4], eb = s[5], docks = s[6];
+      L.circleMarker([lat, lon], { radius: 4.5, weight: 0, fillOpacity: .85, fillColor: colorFor(mech, eb, docks, cap) })
+        .bindPopup('<strong>' + esc(name) + '</strong><br>' + mech + ' mécaniques · ' + eb + ' électriques<br>' + docks + ' bornes libres / ' + cap)
+        .addTo(map);
+    });
+
+    // Répartition
+    var distColors = ['#c0392b', '#e67e22', '#d4ac0d', '#9bbf5a', '#58a55c', '#8e5bb5'];
+    new Chart($('c-dist'), {
+      type: 'bar',
+      data: { labels: latest.fill_distribution.map(function (r) { return r.bucket; }),
+              datasets: [{ data: latest.fill_distribution.map(function (r) { return r.stations; }),
+                           backgroundColor: distColors, borderRadius: 6 }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false } },
+                 scales: { y: { beginAtZero: true, grid: { color: C('--line') } }, x: { grid: { display: false } } } }
+    });
+
+    // Profil horaire
+    var prof = history.hourly_profile || [];
+    new Chart($('c-hour'), {
+      type: 'bar',
+      data: { labels: prof.map(function (r) { return r.local_hour + 'h'; }),
+              datasets: [
+                { label: 'Mécaniques', data: prof.map(function (r) { return r.avg_bikes - r.avg_ebike; }), backgroundColor: C('--mech'), borderRadius: 4, stack: 's' },
+                { label: 'Électriques', data: prof.map(function (r) { return r.avg_ebike; }), backgroundColor: C('--ebike'), borderRadius: 4, stack: 's' }
+              ] },
+      options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } },
+                 scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, grid: { color: C('--line') } } } }
+    });
+
+    // Historique
+    var series = history.series || [];
+    if (series.length < 2) {
+      $('c-hist').parentNode.innerHTML = '<p class="empty-note">L\'historique se remplit automatiquement : une nouvelle mesure est ajoutée chaque heure.</p>';
+    } else {
+      new Chart($('c-hist'), {
+        type: 'line',
+        data: { labels: series.map(function (r) { return new Date(r.snapshot_utc); }),
+                datasets: [
+                  { label: 'Mécaniques', data: series.map(function (r) { return r.mechanical; }), borderColor: C('--mech'), backgroundColor: C('--mech'), pointRadius: 0, tension: .3 },
+                  { label: 'Électriques', data: series.map(function (r) { return r.ebike; }), borderColor: C('--ebike'), backgroundColor: C('--ebike'), pointRadius: 0, tension: .3 },
+                  { label: 'Stations vides', data: series.map(function (r) { return r.empty_stations; }), borderColor: C('--empty'), backgroundColor: C('--empty'), pointRadius: 0, tension: .3, yAxisID: 'y2', borderDash: [4, 4] }
+                ] },
+        options: {
+          maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } },
+                     tooltip: { callbacks: { title: function (it) { return it[0].label; } } } },
+          scales: {
+            x: { type: 'category', ticks: { maxTicksLimit: 8, callback: function (v, i) {
+                   var dt = new Date(series[i].snapshot_utc);
+                   return dt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) + ' ' + dt.toLocaleTimeString('fr-FR', { hour: '2-digit', timeZone: 'Europe/Paris' });
+                 } }, grid: { display: false } },
+            y: { title: { display: true, text: 'Vélos' }, grid: { color: C('--line') } },
+            y2: { position: 'right', title: { display: true, text: 'Stations vides' }, grid: { display: false } }
+          }
+        }
+      });
+    }
+
+    // Tableaux
+    $('t-empty').innerHTML = latest.biggest_empty.length ? latest.biggest_empty.map(function (r) {
+      return '<tr><td>' + esc(r.name) + '</td><td class="n">' + r.capacity + '</td></tr>';
+    }).join('') : '<tr><td colspan="2">Aucune station vide 🎉</td></tr>';
+    $('t-ebike').innerHTML = latest.most_ebikes.map(function (r) {
+      return '<tr><td>' + esc(r.name) + '</td><td class="n">' + r.ebike + '</td><td class="n">' + r.bikes + '</td></tr>';
+    }).join('');
+
+    // Qualité
+    var q = latest.quality, labels = { stations_retenues: 'stations retenues', non_installees: 'non installées', depassement_capacite: 'dépassements de capacité signalés', doublons: 'doublons', sans_information: 'sans référentiel', valeurs_negatives: 'valeurs négatives' };
+    $('quality').innerHTML = Object.keys(labels).map(function (k) { return '<span><strong>' + fmt.format(q[k] || 0) + '</strong> ' + labels[k] + '</span>'; }).join('') +
+      '<span><strong>' + fmt.format(history.total_snapshots) + '</strong> mesures historisées</span>';
+  }).catch(function (e) {
+    $('updated').textContent = 'Données indisponibles';
+    console.error(e);
+  });
+})();
+</script>
+</body>
+</html>

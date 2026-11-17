@@ -1,0 +1,1 @@
+{"series":[{"snapshot_utc":"2026-11-17T01:00:00Z","bikes":20166,"mechanical":11834,"ebike":8332,"empty_stations":49,"full_stations":33}],"hourly_profile":[{"local_hour":2,"avg_bikes":20166.0,"avg_ebike":8332.0,"avg_empty":49.0,"samples":1}],"total_snapshots":1}
